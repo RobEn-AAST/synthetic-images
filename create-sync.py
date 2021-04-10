@@ -11,33 +11,7 @@ import imutils
 import glob
 
 
-def getContourDims(diff):
-    # thresh = cv2.threshold(diff, 120, 255, cv2.THRESH_BINARY_INV)[1]
-    diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(diff, 120, 255, cv2.THRESH_OTSU)
-    # cv2.imshow(winname='x', mat=thresh)
-    # cv2.waitKey(0)
-    # thresh = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
-    # thresh = cv2.adaptiveThreshold(diff, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 115, 1)
-    # thresh = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-    cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cnts = imutils.grab_contours(cnts)
-    # thresh = cv2.adaptiveThreshold(diff, t, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, a, 2)
-    # cv2.imshow('t', thresh)
-    # cv2.waitKey(0)
-    cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cnts = imutils.grab_contours(cnts)
-    last_area = 0
-    for c in cnts:
-        area = cv2.contourArea(c)
-        if area > last_area:
-            (x, y, w, h) = cv2.boundingRect(c)
-    # compute the bounding box of the contour and then draw the
-    # bounding box on both input images to represent where the two
-    # images differ
-    # cv2.rectangle(imageA, (x, y), (x + w, y + h), (0, 0, 255), 2)
-    return x, y, w, h
-
+skip = "n"
 
 # Entrypoint Args
 parser = argparse.ArgumentParser(description='Create synthetic training data for object detection algorithms.')
@@ -55,7 +29,7 @@ parser.add_argument("-g", "--groups", type=bool, default=False,
                     help="Include groups of objects in training set?")
 parser.add_argument("-mut", "--mutate", type=bool, default=True,
                     help="Perform mutatuons to objects (rotation, brightness, shapness, contrast)")
-parser.add_argument("-dc", "--doclasses", type=bool, default=0,
+parser.add_argument("-dc", "--doclasses", type=bool, default=False,
                     help="define classid index")
 parser.add_argument("-osync", "--outsync", type=bool, default=True,
                     help="prints each background with each object position for revising offline")                    
@@ -137,16 +111,14 @@ def get_group_obj_positions(obj_group, bkg):
 def mutate_image(img, ang=-1):
     # resize image for random value
     resize_rate = random.choice(sizes)
-    img = img.resize([int(img.width*resize_rate), int(img.height*resize_rate)], Image.BILINEAR)
+    img = img.resize([int(img.width*resize_rate), int(img.height*resize_rate)], Image.ANTIALIAS)
 
     # rotate image for random andle and generate exclusion mask 
     if ang == -1:
         rotate_angle = random.randint(0,360)
     else:
         rotate_angle = ang
-    mask = Image.new('L', img.size, 255)
     img = img.rotate(rotate_angle, expand=True)
-    mask = mask.rotate(rotate_angle, expand=True)
 
 
     # perform some enhancements on image
@@ -156,8 +128,11 @@ def mutate_image(img, ang=-1):
         enhancer = random.choice(enhancers)
         enhancers.remove(enhancer)
         img = enhancer(img).enhance(random.uniform(0.5,1.5))
+    img.save("tmp.png")
+    os.system("convert -trim tmp.png tmp.png")
+    img = Image.open("tmp.png")
 
-    return img, mask, rotate_angle
+    return img, rotate_angle
 
 classesFile = set([])
 
@@ -204,8 +179,11 @@ if __name__ == "__main__":
             bkg_path = line[0]
         else:
             bkg_path = base_bkgs_path + line
-
-        bkg_img = Image.open(bkg_path)
+        try :
+            bkg_img = Image.open(bkg_path)
+        except Exception as e:
+            print(e)
+            continue
         bkg_x, bkg_y = bkg_img.size
         
         # Do single objs first
@@ -214,24 +192,71 @@ if __name__ == "__main__":
             obj_images = str(line[1])
 
         for i in obj_images:
-            if not args.insync:
-            # Load the single obj
-                if i.__contains__('.txt'):
-                    continue
-                i_path = objs_path + i
-                print(i_path)
-                obj_img = Image.open(i_path)
-                
+            try :
+                if not args.insync:
+                # Load the single obj
+                    if not (i.__contains__('.png') or i.__contains__('.PNG') or i.__contains__('jpg') or i.__contains__('.JPG')):
+                        continue
+                    i_path = objs_path + i
+                    print(i_path)
+                    obj_img = Image.open(i_path)
+                    
 
-                # Get an array of random obj positions (from top-left corner)
-                obj_h, obj_w, x_pos, y_pos = get_obj_positions(obj=obj_img, bkg=bkg_img, count=count_per_size)            
-            else :
-                obj_img = Image.open(str(line[1]))
-                
+                    # Get an array of random obj positions (from top-left corner)
+                    obj_h, obj_w, x_pos, y_pos = get_obj_positions(obj=obj_img, bkg=bkg_img, count=count_per_size)            
+                else :
+                    obj_img = Image.open(str(line[1]))
+                    
 
-            # Create synthetic images based on positions
-            if not args.insync:
-                for h, w, x, y in zip(obj_h, obj_w, x_pos, y_pos):
+                # Create synthetic images based on positions
+                if not args.insync:
+                    for h, w, x, y in zip(obj_h, obj_w, x_pos, y_pos):
+                        # Copy background
+                        if(args.outsync):
+                            osync.write(str(bkg_path) + " " +str(i_path) + " ")
+                        bkg_w_obj = bkg_img.copy()
+                        if(args.outsync):
+                            osync.write( str(h) + " " + str(w) + " " + str(x) + " " + str(y) + " ")
+                        if args.mutate:
+                            new_obj, ang = mutate_image(obj_img)
+
+                            # osync.write(str())
+                            # Paste on the obj
+                            bkg_w_obj.paste(new_obj, (x, y), new_obj)
+                        else:
+                            # Adjust obj size
+                            new_obj = obj_img.resize(size=(w, h))
+                            # Paste on the obj
+                            bkg_w_obj.paste(new_obj, (x, y), new_obj)
+                        output_fp = output_images + str(n) + ".png"
+                        classid = i.split('_')[1].split('.')[0]
+                        noExtName = output_fp.split('.')[0]
+                        newFileName = noExtName+".txt"
+                        if args.mutate:
+                            with open(newFileName, "w") as f:
+                                # new_obj.show()
+                                # x1,y1,w1,h1 = getContourDims(cv2.cvtColor(np.array(new_obj), cv2.COLOR_RGB2BGR))
+                                x1,y1,w1,h1 = 0,0,new_obj.size[0] ,new_obj.size[1]
+                                osync.write(str(h1) +" "+ str(w1) +" "+ str(x1) +" "+ str(y1) + " " + str(ang))
+                                # x1,y1,w1,h1 = getContourDims(cv2.cvtColor(np.array(new_obj), cv2.COLOR_RGB2BGR))
+                                data = str(classid) + " " + str(((x+x1+(0.5*w1))/bkg_x).round(6)) + " " + str(((y+y1+(0.5*h1))/bkg_y).round(6)) + " " + str(round((w1/bkg_x),6)) + " " + str(round((h1/bkg_y),6))
+                                print(str(data) + " " + newFileName)
+                                f.write(data)
+                        else:
+                            with open(newFileName, "w") as f:
+                                data = str(classid) + " " + str(((x+(0.5*w))/bkg_x).round(6)) + " " + str(((y+(0.5*h))/bkg_y).round(6)) + " " + str(round((w/bkg_x),6)) + " " + str(round((h/bkg_y),6))
+                                print(data + " " + newFileName)
+                                f.write(data)
+                        if(args.outsync):
+                            osync.write("\n")
+                        
+                        n += 1
+                        # Save the image
+                        bkg_w_obj.save(fp=output_fp, format="png")
+                else:
+                    h,w,x,y = int(line[2]), int(line[3]), int(line[4]), int(line[5])
+                    if(args.insync):
+                        h, w, x, y = int(line[2]), int(line[3]), int(line[4]), int(line[5])
                     # Copy background
                     if(args.outsync):
                         osync.write(str(bkg_path) + " " +str(i_path) + " ")
@@ -239,7 +264,8 @@ if __name__ == "__main__":
                     if(args.outsync):
                         osync.write( str(h) + " " + str(w) + " " + str(x) + " " + str(y) + " ")
                     if args.mutate:
-                        new_obj, mask, ang = mutate_image(obj_img)
+                        ang = int(line[10])
+                        new_obj, _ = mutate_image(obj_img, ang)
                         # osync.write(str())
                         # Paste on the obj
                         bkg_w_obj.paste(new_obj, (x, y), new_obj)
@@ -249,18 +275,25 @@ if __name__ == "__main__":
                         # Paste on the obj
                         bkg_w_obj.paste(new_obj, (x, y), new_obj)
                     output_fp = output_images + str(n) + ".png"
-                    classid = i.split('_')[1].split('.')[0]
+                    if args.insync:
+                        classid = line[1].split('.')[0].split('_')[1]
+                    else:
+                        classid = i.split('_')[1].split('.')[0]
                     noExtName = output_fp.split('.')[0]
                     newFileName = noExtName+".txt"
                     if args.mutate:
                         with open(newFileName, "w") as f:
                             # new_obj.show()
-                            x1,y1,w1,h1 = getContourDims(cv2.cvtColor(np.array(new_obj), cv2.COLOR_RGB2BGR))
-                            osync.write(str(h1) +" "+ str(w1) +" "+ str(x1) +" "+ str(y1) + " " + str(ang))
+                            if args.insync:
+                                h1,w1,x1,y1 = int(line[6]), int(line[7]), int(line[8]), int(line[9])
                             # x1,y1,w1,h1 = getContourDims(cv2.cvtColor(np.array(new_obj), cv2.COLOR_RGB2BGR))
-                            data = str(classid) + " " + str(((x+x1+(0.5*w1))/bkg_x).round(6)) + " " + str(((y+y1+(0.5*h1))/bkg_y).round(6)) + " " + str(round((w1/bkg_x),6)) + " " + str(round((h1/bkg_y),6))
-                            print(str(data) + " " + newFileName)
-                            f.write(data)
+                                data = str(classid) + " " + str(round(((x+x1+(0.5*w1)))/bkg_x, 6)) + " " + str(round(((y+y1+(0.5*h1)))/bkg_y,6)) + " " + str(round((w1/bkg_x),6)) + " " + str(round((h1/bkg_y),6))
+                                print(str(data) + " " + newFileName)
+                                f.write(data)
+                                xk = data.split(' ')
+                                for ix in xk[:-1]:
+                                    if float(ix) >1:
+                                        pass    
                     else:
                         with open(newFileName, "w") as f:
                             data = str(classid) + " " + str(((x+(0.5*w))/bkg_x).round(6)) + " " + str(((y+(0.5*h))/bkg_y).round(6)) + " " + str(round((w/bkg_x),6)) + " " + str(round((h/bkg_y),6))
@@ -268,76 +301,30 @@ if __name__ == "__main__":
                             f.write(data)
                     if(args.outsync):
                         osync.write("\n")
-                    
-                    n += 1
-                    # Save the image
                     bkg_w_obj.save(fp=output_fp, format="png")
-            else:
-                h,w,x,y = int(line[2]), int(line[3]), int(line[4]), int(line[5])
+                    n += 1
+
+
+                    if args.annotate:
+                        # Make annotation
+                        ann = [{'coordinates': {'height': h, 'width': w, 'x': x+(0.5*w), 'y': y+(0.5*h)}, 'label': i.split(".png")[0]}]
+                        # Save the annotation data
+                        annotations.append({
+                            "path": output_fp,
+                            "annotations": ann
+                        })
+                
+                # print(n)
+                
+
                 if(args.insync):
-                    h, w, x, y = int(line[2]), int(line[3]), int(line[4]), int(line[5])
-                # Copy background
-                if(args.outsync):
-                    osync.write(str(bkg_path) + " " +str(i_path) + " ")
-                bkg_w_obj = bkg_img.copy()
-                if(args.outsync):
-                    osync.write( str(h) + " " + str(w) + " " + str(x) + " " + str(y) + " ")
-                if args.mutate:
-                    ang = int(line[10])
-                    new_obj, mask, _ = mutate_image(obj_img, ang)
-                    # osync.write(str())
-                    # Paste on the obj
-                    bkg_w_obj.paste(new_obj, (x, y), new_obj)
-                else:
-                    # Adjust obj size
-                    new_obj = obj_img.resize(size=(w, h))
-                    # Paste on the obj
-                    bkg_w_obj.paste(new_obj, (x, y), new_obj)
-                output_fp = output_images + str(n) + ".png"
-                if args.insync:
-                    classid = line[1].split('.')[0].split('_')[1]
-                else:
-                    classid = i.split('_')[1].split('.')[0]
-                noExtName = output_fp.split('.')[0]
-                newFileName = noExtName+".txt"
-                if args.mutate:
-                    with open(newFileName, "w") as f:
-                        # new_obj.show()
-                        if args.insync:
-                            h1,w1,x1,y1 = int(line[6]), int(line[7]), int(line[8]), int(line[9])
-                        # x1,y1,w1,h1 = getContourDims(cv2.cvtColor(np.array(new_obj), cv2.COLOR_RGB2BGR))
-                            data = str(classid) + " " + str(round(((x+x1+(0.5*w1)))/bkg_x, 6)) + " " + str(round(((y+y1+(0.5*h1)))/bkg_y,6)) + " " + str(round((w1/bkg_x),6)) + " " + str(round((h1/bkg_y),6))
-                            print(str(data) + " " + newFileName)
-                            f.write(data)
-                            xk = data.split(' ')
-                            for ix in xk[:-1]:
-                                if float(ix) >1:
-                                    pass    
-                else:
-                    with open(newFileName, "w") as f:
-                        data = str(classid) + " " + str(((x+(0.5*w))/bkg_x).round(6)) + " " + str(((y+(0.5*h))/bkg_y).round(6)) + " " + str(round((w/bkg_x),6)) + " " + str(round((h/bkg_y),6))
-                        print(data + " " + newFileName)
-                        f.write(data)
-                if(args.outsync):
-                    osync.write("\n")
-                bkg_w_obj.save(fp=output_fp, format="png")
-                n += 1
-
-
-                if args.annotate:
-                    # Make annotation
-                    ann = [{'coordinates': {'height': h, 'width': w, 'x': x+(0.5*w), 'y': y+(0.5*h)}, 'label': i.split(".png")[0]}]
-                    # Save the annotation data
-                    annotations.append({
-                        "path": output_fp,
-                        "annotations": ann
-                    })
-            
-            # print(n)
-            
-
-            if(args.insync):
-                break
+                    break
+                
+            except Exception as e:
+                print(e)
+                if skip=="s":
+                    skip=input("continue")
+                continue
 
         if args.groups:
             # 24 Groupings of 2-4 objs together on a single background
