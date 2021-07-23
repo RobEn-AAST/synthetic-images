@@ -48,8 +48,8 @@ bkg_images = [f for f in os.listdir(base_bkgs_path) if not f.startswith(".")]
 objs_path = args.objects
 obj_images = [f for f in os.listdir(objs_path) if not f.startswith(".")]
 # sizes = [0.4, 0.6, 0.8, 1, 1.2] # different obj sizes to use TODO make configurable
-sizes = [1,1] # different obj sizes to use TODO make configurable
-count_per_size = 4 # number of locations for each obj size TODO make configurable
+sizes = [1] # different obj sizes to use TODO make configurable
+count_per_size = 1 # number of locations for each obj size TODO make configurable
 annotations = [] # store annots here
 output_images = args.output
 n = 1
@@ -87,8 +87,8 @@ def intersects(box, new_box):
 def get_group_obj_positions(obj_group, bkg):
     bkg_w, bkg_h = bkg.size
     boxes = []
-    objs = [Image.open(objs_path + obj_images[i]) for i in obj_group]
-    obj_sizes = [tuple([int(0.6*x) for x in i.size]) for i in objs]
+    objs = [Image.open(objs_path + obj_images[i]).convert("RGBA") for i in obj_group]
+    obj_sizes = [tuple([int(1*x) for x in i.size]) for i in objs]
     for w, h in obj_sizes:
         # set background image boundaries
         max_x, max_y = bkg_w-w, bkg_h-h
@@ -113,13 +113,13 @@ def mutate_image(img, ang=-1):
     resize_rate = random.choice(sizes)
     img = img.resize([int(img.width*resize_rate), int(img.height*resize_rate)], Image.ANTIALIAS)
 
+
     # rotate image for random andle and generate exclusion mask 
     if ang == -1:
         rotate_angle = random.randint(0,360)
     else:
         rotate_angle = ang
     img = img.rotate(rotate_angle, expand=True)
-
 
     # perform some enhancements on image
     enhancers = [ImageEnhance.Brightness, ImageEnhance.Color, ImageEnhance.Contrast, ImageEnhance.Sharpness]
@@ -129,8 +129,14 @@ def mutate_image(img, ang=-1):
         enhancers.remove(enhancer)
         img = enhancer(img).enhance(random.uniform(0.5,1.5))
     img.save("tmp.png")
+    # color = "'rgba("+str(random.randint(0,255))+","+str(random.randint(0,255))+","+str(random.randint(0,255))+",255)'"
+
     os.system("convert -trim tmp.png tmp.png")
-    img = Image.open("tmp.png")
+    # os.system("convert tmp.png -border 5 -bordercolor "+color+" tmp.png")
+    # os.system('convert tmp.png -transparent "#000000" -fuzz 10% tmp.png')
+    img = Image.open("tmp.png").convert("RGBA")
+
+
 
     return img, rotate_angle
 
@@ -199,13 +205,13 @@ if __name__ == "__main__":
                         continue
                     i_path = objs_path + i
                     print(i_path)
-                    obj_img = Image.open(i_path)
+                    obj_img = Image.open(i_path).convert("RGBA")
                     
 
                     # Get an array of random obj positions (from top-left corner)
                     obj_h, obj_w, x_pos, y_pos = get_obj_positions(obj=obj_img, bkg=bkg_img, count=count_per_size)            
                 else :
-                    obj_img = Image.open(str(line[1]))
+                    obj_img = Image.open(str(line[1])).convert("RGBA")
                     
 
                 # Create synthetic images based on positions
@@ -253,6 +259,15 @@ if __name__ == "__main__":
                         n += 1
                         # Save the image
                         bkg_w_obj.save(fp=output_fp, format="png")
+                        os.system("convert "+output_fp+" "+output_fp)
+                        luck = random.randint(0,10)
+                        if luck==7:
+                            blur = str(random.randint(0,3))+"x"+str(random.randint(0,3))
+                        else:
+                            blur = str(random.randint(0,2))+"x"+str(random.randint(0,2))
+                        os.system("convert "+output_fp+" -blur "+ blur +" "+ output_fp)
+
+
                 else:
                     h,w,x,y = int(line[2]), int(line[3]), int(line[4]), int(line[5])
                     if(args.insync):
@@ -302,6 +317,14 @@ if __name__ == "__main__":
                     if(args.outsync):
                         osync.write("\n")
                     bkg_w_obj.save(fp=output_fp, format="png")
+                    os.system("convert "+output_fp+" "+output_fp)
+                    luck = random.randint(0,10)
+                    if luck==7:
+                        blur = str(random.randint(0,3))+"x"+str(random.randint(0,3))
+                    else:
+                        blur = str(random.randint(0,2))+"x"+str(random.randint(0,2))
+                    os.system("convert "+output_fp+" -blur "+ blur +" "+ output_fp)
+                    
                     n += 1
 
 
@@ -339,7 +362,7 @@ if __name__ == "__main__":
                 # For each obj in the group
                 for i, size, box in zip(group, obj_sizes, boxes):
                     # Get the obj
-                    obj = Image.open(objs_path + obj_images[i])
+                    obj = Image.open(objs_path + obj_images[i]).convert("RGBA")
                     obj_w, obj_h = size
                     # Resize it as needed
                     new_obj = obj.resize((obj_w, obj_h))
@@ -362,6 +385,13 @@ if __name__ == "__main__":
                 output_fp = output_images + str(n) + ".png"
                 # Save image
                 bkg_w_obj.save(fp=output_fp, format="png")
+                os.system("convert "+output_fp+" "+output_fp)
+                luck = random.randint(0,10)
+                if luck==7:
+                    blur = str(random.randint(0,3))+"x"+str(random.randint(0,3))
+                else:
+                    blur = str(random.randint(0,2))+"x"+str(random.randint(0,2))
+                os.system("convert "+output_fp+" -blur "+ blur +" "+ output_fp)
                 if args.annotate:
                     # Save annotation data
                     annotations.append({
